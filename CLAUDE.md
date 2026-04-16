@@ -15,8 +15,9 @@
 
 - **壁打ち・まとめ** → `.claude/rules/sparring.md` を参照
 - **進捗管理** → `.claude/rules/progress.md` を参照
+- **振り返り・自己改善** → `.claude/rules/retrospective.md` を参照（常時バックグラウンドで動作）
 
-進捗は `progress.md`、まとめは `_posts/` に格納。
+進捗は `progress.md`、まとめは `_posts/` に格納。対話の気づきは `observations.md` に蓄積される。
 
 ## この本特有の注意点
 
