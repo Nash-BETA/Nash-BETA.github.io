@@ -1,11 +1,11 @@
 ---
-title: "単体テストの考え方/使い方 - 4〜6章：第2部 単体テストとその価値（前半）"
+title: "単体テストの考え方/使い方 - 4〜7章：第2部 単体テストとその価値"
 date: 2026-10-05 21:22:47 +0900
 categories: [輪読, 単体テストの考え方/使い方]
 tags: [単体テストの考え方/使い方]
 ---
 
-# 第2部（4〜6章）まとめ
+# 第2部（4〜7章）まとめ
 
 ## 第4章 良い単体テストを構成する4本の柱
 
@@ -466,3 +466,233 @@ end
 | ③ 関数型 | しない | **しない** | 出力値ベースの単体テスト |
 
 ②と③の違いは「ドメインの中での状態変更を許すかどうか」だけ。本が「関数型アーキテクチャは、ヘキサゴナルに極端な制約を課したもの」と言うのはこのため。クリーンアーキテクチャの「依存は内側（業務ルール）に向ける」「境界線を引く」も同じ考え方で、22章「クリーンアーキテクチャ」ではヘキサゴナル・アーキテクチャが元になった設計の1つとして挙がる。
+
+---
+
+## 第7章 単体テストの価値を高めるリファクタリング
+
+### 要点
+
+- 価値のあるテストを**見分ける**（4章）から、**書ける**ようにする章。プロダクション・コードを改善せずに、価値のある単体テストは生み出せない
+- コードは「深さ（複雑さ・ドメインにおける重要性）」と「広さ（協力者オブジェクトの数）」で4種類に分けられ、テストの仕方がそれぞれ違う
+
+| 種類 | 特徴 | Rails で言うと | テストの方針 |
+| --- | --- | --- | --- |
+| ドメイン・モデル／アルゴリズム | 深い・狭い | 料金計算や状態遷移を持つ model のメソッド、PORO | **単体テストで手厚く** |
+| 取るに足らないコード | 浅い・狭い | `attr_accessor`、関連の定義だけ、単純な scope | **テストしない** |
+| コントローラ | 浅い・広い | Controller、呼び出し順を並べるだけの Service | **統合テストで通しで確認**（第3部） |
+| 過度に複雑なコード | 深い・広い | 業務ルールと DB 保存とメール送信が混ざった fat controller／fat service、callback だらけの model | 上の2つに**割る** |
+
+- 重要で複雑なコードほど、協力者オブジェクトを減らす。「質の悪いテストを書くくらいなら、書かないほうがよい」
+- 割るときの型が**質素なオブジェクト（Humble Object）**。テストしやすいロジックを抜き出し、テストしにくい依存（DB、UI、非同期など）との接点を、ロジックを持たない薄い包み紙にする。5・6章のヘキサゴナル・アーキテクチャ、関数型アーキテクチャ、MVC の Controller、DDD の集約はどれもこの適用例。深さと広さを1つのクラスに両方持たせない（クリーンアーキテクチャの SRP、23章「プレゼンターとHumble Object」とも繋がる）
+- 本は、ドメインのクラスが自分で DB を読み書きする形を **Active Record パターン**と名指しし、「単純で短命なプロジェクトならうまくいくが、大きくなると破綻しやすい」としている。DB やメッセージ・バスをインターフェイスにしてモックを注入する直し方は**やらない**（プロセス外依存のままなので、テストが複雑なモックを抱え、壊れやすくなる）
+- ユーザ管理システム（メールアドレスを変えると、自社ドメインなら従業員／それ以外は顧客になり、従業員数を増減し、外部に通知する）を3段階で割る
+
+| 段階 | やること | 結果 |
+| --- | --- | --- |
+| 1回目 | DB とメッセージ・バスを触る部分をコントローラに移す | `User` がドメイン・モデルになる。代わりにコントローラが変換ロジックを抱える |
+| 2回目 | DB の生データから `User` を作る変換を Factory に移す | コントローラが連携の指揮だけになる。**Rails では ActiveRecord（O/R マッパー）がこの役を担うので不要** |
+| 3回目 | 会社のデータとロジックを `Company` に移す | 「尋ねるな、命じよ」の形になる |
+
+- コントローラに分岐が要るときは、3つの性質のうち2つしか取れない
+
+| 選択肢 | コントローラの簡潔さ | ドメインのテストのしやすさ | 性能 |
+| --- | --- | --- | --- |
+| A. 読み書きを全部、最初と最後に寄せる | ○ | ○ | **✕** |
+| B. ドメインに DB などを渡す | ○ | **✕** | ○ |
+| C. 決定を細かく分割する | **✕** | ○ | ○ |
+
+本の選択は C。コントローラに入る分岐は、**確認後実行（CanExecute/Execute）パターン**と**ドメイン・イベント**で最小限にする（疑問②のコード）。
+
+- 抽象化する対象より、抽象化された結果のほうがテストしやすい。ドメイン・イベントはメッセージ・バスへの送信の抽象化、ドメイン・クラスの状態変更は DB 更新の抽象化。本物の副作用は最後にコントローラがまとめて起こす
+- 完璧には分けられない（メールアドレスの重複チェックや、外部呼び出しが失敗したときの判断はコントローラに残る）。それでも分ける価値は大きい
+- 観察可能な振る舞いは**玉ねぎの層**。各層のテストは1つ上の層の視点で書き、下の層とのやり取りは確かめない
+
+```
+外部クライアント
+   │ ① ChangeUserEmail#execute を呼ぶ     ← 外部にとっての観察可能な振る舞い（統合テスト）＋メッセージ・バスへの送信
+   ▼
+ChangeUserEmail（コントローラ）
+   │ ② User#change_email を呼ぶ            ← コントローラにとっての観察可能な振る舞い（User の単体テスト）
+   ▼
+User
+   │ ③ Company#corporate_email? などを呼ぶ ← User にとっての観察可能な振る舞い（Company の単体テスト）
+   ▼
+Company
+```
+
+---
+
+### 疑問①：テストを考慮したアプリの設計が大事ってこと？
+
+そう。ただし、テストのためだけに設計を変えろという話ではない。業務ルールと DB・外部とのやり取りを分けると、テストがしやすくなるだけでなく、本番のコードそのものも複雑になりにくくなる。著者も「テストしやすい設計が、そのまま保守しやすい設計にもなる」と書いている。1章の「テストが書きにくいなら設計が悪い」と同じで、テストの書きにくさは設計の問題を教えてくれる警報。
+
+逆に、テストのためだけにプロダクション・コードに手を入れる（private にすべきものを公開する、テスト用の分岐を足す）のは、11章の「プロダクション・コードへの汚染」というアンチ・パターン。
+
+最初の形（Rails で素直に書いた ActiveRecord）と、割ったあとの形。
+
+```ruby
+# ❌ 過度に複雑：業務ルールと DB アクセスとメッセージ送信が1つのメソッドに混ざっている
+class User < ApplicationRecord
+  def change_email(new_email)
+    return if email == new_email
+
+    company  = Company.first                                               # DB から読む
+    new_type = new_email.split("@").last == company.domain_name ? "employee" : "customer"
+    if user_type != new_type
+      delta = new_type == "employee" ? 1 : -1
+      company.update!(number_of_employees: company.number_of_employees + delta)   # DB に書く
+    end
+
+    update!(email: new_email, user_type: new_type)                          # DB に書く
+    MessageBus.send_email_changed_message(id, new_email)                    # 外部に送る
+  end
+end
+```
+
+```ruby
+# ドメイン：DB も外部も触らない。メモリ上で自分たちの状態を変えるだけ
+class Company < ApplicationRecord
+  def corporate_email?(email)
+    email.split("@").last == domain_name
+  end
+
+  def change_number_of_employees(delta)
+    raise ArgumentError if number_of_employees + delta < 0
+
+    self.number_of_employees += delta
+  end
+end
+
+class User < ApplicationRecord
+  def change_email(new_email, company)
+    return if email == new_email
+
+    new_type = company.corporate_email?(new_email) ? "employee" : "customer"
+    company.change_number_of_employees(new_type == "employee" ? 1 : -1) if user_type != new_type
+
+    self.email = new_email
+    self.user_type = new_type
+  end
+end
+
+# コントローラ（アプリケーション・サービス）：読む・渡す・保存する・送る、だけ
+class ChangeUserEmail
+  def initialize(user_id:, new_email:)
+    @user_id, @new_email = user_id, new_email
+  end
+
+  def execute
+    user    = User.find(@user_id)
+    company = Company.first
+
+    user.change_email(@new_email, company)
+
+    ActiveRecord::Base.transaction do
+      company.save!
+      user.save!
+    end
+    MessageBus.send_email_changed_message(user.id, @new_email)
+  end
+end
+```
+
+ActiveRecord を使っていても、**メソッドの中で DB に触らなければドメイン・モデルとして扱える**。テストは `build` だけで書けるので、2章の表で言う「`build` だけで完結する model spec ＝ 単体テスト」になる。
+
+### 疑問②：何が大事かを考えることが大事？
+
+そう。テストを書く前に「このコードは4種類のどれか」「この事前条件は業務上大事か」を考える。割ったあとのコードを4種類の表に当てはめると、単体テストを手厚くするのは左上だけになる。
+
+| | 協力者オブジェクトが少ない | 協力者オブジェクトが多い |
+| --- | --- | --- |
+| **複雑・重要** | `User#change_email`、`Company#change_number_of_employees`、`Company#corporate_email?` | （リファクタリングで無くなった） |
+| **単純・重要でない** | コンストラクタ → **テストしない** | `ChangeUserEmail#execute` → **統合テスト**（8章） |
+
+```ruby
+RSpec.describe User do
+  it "顧客のメールアドレスを、従業員のものに変える" do
+    company = build(:company, domain_name: "mycorp.com", number_of_employees: 1)
+    sut = build(:user, email: "user@gmail.com", user_type: "customer")
+
+    sut.change_email("new@mycorp.com", company)
+
+    expect(company.number_of_employees).to eq 2
+    expect(sut).to have_attributes(email: "new@mycorp.com", user_type: "employee")
+  end
+
+  it "従業員のメールアドレスを、顧客のものに変える"
+  it "種類を変えずにメールアドレスを変える"
+  it "同じメールアドレスに変える"
+end
+```
+
+事前条件（バグがあったときに早めに落とす安全網、Fail Fast）も、ドメインにとって重要なものだけテストする。
+
+| 事前条件 | ドメインにとって重要か | テストするか |
+| --- | --- | --- |
+| 従業員数がマイナスにならない（`Company` の不変条件） | 重要 | **する** |
+| Factory に渡すデータが3要素以上ある | 重要ではない | しない |
+
+```ruby
+it "従業員数はマイナスにならない" do
+  company = build(:company, number_of_employees: 0)
+
+  expect { company.change_number_of_employees(-1) }.to raise_error(ArgumentError)
+end
+```
+
+コントローラに分岐が要るときも、「何を判断するか」はドメインに残す。確認後実行パターンとドメイン・イベントで、コントローラは結果に従うだけにする。
+
+```ruby
+EmailChangedEvent = Data.define(:user_id, :new_email)   # 起きたことなので過去形。値として比較できる
+
+class User < ApplicationRecord
+  # 確認：変更できるかを判断する
+  def can_change_email
+    return "確定済みのメールアドレスは変更できません" if email_confirmed?
+
+    nil
+  end
+
+  def email_changed_events
+    @email_changed_events ||= []
+  end
+
+  # 実行：確認を通っていない呼び出しは受け付けない
+  def change_email(new_email, company)
+    raise ArgumentError, can_change_email if can_change_email
+    return if email == new_email                          # 変わらなければイベントも出ない
+
+    # ...種類と従業員数の更新
+    email_changed_events << EmailChangedEvent.new(id, new_email)
+  end
+end
+
+class ChangeUserEmail
+  def execute
+    user = User.find(@user_id)
+    error = user.can_change_email
+    return error if error               # 判断はドメインに任せ、結果に従うだけ
+
+    company = Company.first             # 変更できるときだけ会社を読む（性能を落とさない）
+    user.change_email(@new_email, company)
+    # ...保存
+    user.email_changed_events.each do |event|
+      MessageBus.send_email_changed_message(event.user_id, event.new_email)
+    end
+  end
+end
+
+# テストはモック不要。イベントが溜まったかを確認するだけ
+it "メールアドレスを変えると、変更イベントが記録される" do
+  company = build(:company, domain_name: "mycorp.com", number_of_employees: 1)
+  sut = build(:user, id: 1, email: "user@mycorp.com", user_type: "employee")
+
+  sut.change_email("new@gmail.com", company)
+
+  expect(sut.email_changed_events).to eq [EmailChangedEvent.new(1, "new@gmail.com")]
+end
+```
+
+- DB への保存はメールアドレスが同じでもそのまま行う（アプリ専用の DB とのやり取りは実装の詳細。ActiveRecord は変更が無ければ UPDATE を発行しない）。メッセージ・バスへの送信は外部との契約なので、変わったときだけ送る
+- Rails の `after_commit` コールバックでイベントを送る書き方は、ドメインが自分で外部に送っている形なので過度に複雑寄り。`activerecord-import` のようにコールバックを飛ばす経路で、イベントを補う専用のサービスが必要になる原因にもなる。ドメイン・イベントを溜めてサービスが送る形なら、一括取り込みの経路でも同じ送信処理を通せる
