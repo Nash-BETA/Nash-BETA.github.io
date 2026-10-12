@@ -76,6 +76,30 @@ end
 ```
 
 
+### モックは、外部へ出ていく経路の一番端をモックにする（9.1）
+
+cam なら `UsersCompanyTraitUpdatedEvent.send!` ではなく `SnsPublisher.publish` をモックにして、実際に SNS に出ていく payload を確かめる。
+
+```ruby
+# ❌ 途中（イベント・クラス）をモックにしている：payload の組み立てを確かめていない
+allow(UsersCompanyTraitUpdatedEvent).to receive(:send!)
+# ...
+expect(UsersCompanyTraitUpdatedEvent).to have_received(:send!).with(user, users_company_trait, old_trait)
+
+# ✅ 境界（SnsPublisher）をモックにして、実際に SNS に出ていく中身を確かめる
+allow(SnsPublisher).to receive(:publish)
+# ...
+expect(SnsPublisher).to have_received(:publish).with(
+  anything,                                          # トピック名（設定値）
+  "company_account_manager.UsersCompanyTraitUpdated",
+  hash_including(cam_user_id: user.id, new_company_trait_id: new_trait.id),
+).once
+```
+
+- 途中のクラスをモックにすると、payload の組み立てを通らない（①退行に対する保護が弱い）うえ、メソッド名を変えただけで落ちる（②リファクタリングへの耐性が弱い）
+- 外部のシステムが期待しているのは「この中身が届くこと」で、どのメソッドが呼ばれたかではない。外から見える副作用は、出ていく中身そのものだけ
+- 期待値のイベント名は、プロダクション・コードの定数ではなくリテラルで書く（定数が間違っていても通ってしまう「同義語反復」のテストを避けるため）
+
 ---
 
 ## 第8章 なぜ、統合（integration）テストを行うのか？
@@ -373,23 +397,7 @@ cam の request spec で「ユーザーの部署を変更する」画面を叩�
 | `MessageBus`（途中） | `send_email_changed_message` が呼ばれたか | 低い | 低い（メソッド名を変えると落ちる） |
 | **`Bus`（境界）** | **実際に送られる文字列** | 高い | 高い（送る中身が同じなら落ちない） |
 
-cam に置き換えると、`UsersCompanyTraitUpdatedEvent.send!`（途中）ではなく、最後に SNS に送る `SnsPublisher.publish`（境界）をモックにする。
-
-```ruby
-# ❌ 途中（イベント・クラス）をモックにしている：payload の組み立てを確かめていない
-allow(UsersCompanyTraitUpdatedEvent).to receive(:send!)
-# ...
-expect(UsersCompanyTraitUpdatedEvent).to have_received(:send!).with(user, users_company_trait, old_trait)
-
-# ✅ 境界（SnsPublisher）をモックにして、実際に SNS に出ていく中身を確かめる
-allow(SnsPublisher).to receive(:publish)
-# ...
-expect(SnsPublisher).to have_received(:publish).with(
-  anything,                                          # トピック名（設定値）
-  "company_account_manager.UsersCompanyTraitUpdated",
-  hash_including(cam_user_id: user.id, new_company_trait_id: new_trait.id),
-).once
-```
+cam に置き換えると、`UsersCompanyTraitUpdatedEvent.send!`（途中）ではなく、最後に SNS に送る `SnsPublisher.publish`（境界）をモックにする（コードは冒頭のポイント参照）。
 
 - 境界のテスト・ダブルは手書きのモック（**スパイ**）にすると、確認用のメソッドを持たせられて読みやすい。RSpec の `spy` はフレームワークが作るので、本の定義ではモック
 
